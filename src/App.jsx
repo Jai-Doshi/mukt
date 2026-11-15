@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { MuktProvider, useMukt } from "./context/MuktContext";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { Sidebar } from "./components/layout/Sidebar";
@@ -19,9 +19,13 @@ function AppContent() {
   const { activeTab } = useMukt();
   const isMobile = useIsMobile(991);
 
+  const handleFinishPreloader = useCallback(() => {
+    setIsLoading(false);
+  }, []);
+
   return (
     <>
-      {isLoading && <Preloader onFinish={() => setIsLoading(false)} />}
+      {isLoading && <Preloader onFinish={handleFinishPreloader} />}
       <div className="app-layout">
         {/* Desktop / Tablet Sidebar */}
         {!isMobile && <Sidebar />}

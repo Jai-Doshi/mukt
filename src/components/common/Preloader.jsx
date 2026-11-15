@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 const RELATABLE_PHRASES = [
   "Tracking every rupee borrowed and repaid...",
@@ -7,34 +7,47 @@ const RELATABLE_PHRASES = [
   "Keeping your financial ledger 100% private...",
 ];
 
-export function Preloader({ onFinish, minDuration = 1400 }) {
+export function Preloader({ onFinish, minDuration = 1200 }) {
   const [phraseIdx, setPhraseIdx] = useState(0);
   const [isFadingOut, setIsFadingOut] = useState(false);
+  const onFinishRef = useRef(onFinish);
+
+  useEffect(() => {
+    onFinishRef.current = onFinish;
+  });
 
   useEffect(() => {
     // Rotate through relatable phrases
     const phraseInterval = setInterval(() => {
       setPhraseIdx((prev) => (prev + 1) % RELATABLE_PHRASES.length);
-    }, 700);
+    }, 600);
 
     // Minimum display time for smooth experience
     const timer = setTimeout(() => {
       setIsFadingOut(true);
       setTimeout(() => {
-        onFinish?.();
-      }, 450);
+        onFinishRef.current?.();
+      }, 400);
     }, minDuration);
 
     return () => {
       clearInterval(phraseInterval);
       clearTimeout(timer);
     };
-  }, [minDuration, onFinish]);
+  }, [minDuration]);
+
+  const handleDismiss = () => {
+    setIsFadingOut(true);
+    setTimeout(() => {
+      onFinishRef.current?.();
+    }, 150);
+  };
 
   return (
     <div
       role="status"
       aria-label="Loading Mukt"
+      onClick={handleDismiss}
       style={{
         position: "fixed",
         inset: 0,
@@ -45,11 +58,12 @@ export function Preloader({ onFinish, minDuration = 1400 }) {
         alignItems: "center",
         justifyContent: "center",
         padding: "24px",
-        transition: "opacity 0.45s ease, transform 0.45s ease",
+        transition: "opacity 0.4s ease, transform 0.4s ease",
         opacity: isFadingOut ? 0 : 1,
         transform: isFadingOut ? "scale(1.03)" : "scale(1)",
         pointerEvents: isFadingOut ? "none" : "auto",
         userSelect: "none",
+        cursor: "pointer",
       }}
     >
       {/* Ambient background glow */}

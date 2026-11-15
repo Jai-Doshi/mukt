@@ -6,7 +6,7 @@ import { Avatar } from "../common/Avatar";
 import { CustomSelect } from "../common/CustomSelect";
 
 export function OnboardingModal() {
-  const { state, updateSettings, addPerson, loadDemo, closeModal, triggerConfetti } = useMukt();
+  const { state, completeOnboarding, loadDemo, closeModal } = useMukt();
 
   const [step, setStep] = useState(0);
   const [name, setName] = useState(state.people.find((p) => p.id === "me")?.name || "");
@@ -40,28 +40,12 @@ export function OnboardingModal() {
       setError("Please choose two different currencies (or keep both if strictly single currency).");
     }
 
-    // Save user name
-    const me = state.people.find((p) => p.id === "me");
-    if (me && name.trim()) {
-      me.name = name.trim();
-    }
-
-    // Add people
-    people.forEach((pName, i) => {
-      const exists = state.people.some((p) => p.name.toLowerCase() === pName.toLowerCase());
-      if (!exists) {
-        addPerson(pName, COLORS[(i + 1) % COLORS.length]);
-      }
-    });
-
-    updateSettings({
+    completeOnboarding({
+      userName: name,
       loanCur,
       localCur,
-      onboarded: true,
+      stakeholders: people,
     });
-
-    triggerConfetti();
-    closeModal();
   };
 
   return (

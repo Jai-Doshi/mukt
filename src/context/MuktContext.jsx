@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   KEY,
   LEGACY_KEY,
@@ -27,6 +27,7 @@ function freshState() {
       display: "loan", // 'loan' or 'local'
       rate: null,
       rateDate: null,
+      rateLastFetched: null,
       theme: "auto", // 'auto', 'light', 'dark'
       themeAccent: "emerald",
       onboarded: false,
@@ -50,6 +51,7 @@ function migrateLegacy(s) {
   st.payments = (s.payments || []).map(conv);
   st.settings.rate = s.settings?.rate || null;
   st.settings.rateDate = s.settings?.rateDate || null;
+  st.settings.rateLastFetched = todayISO();
   st.settings.display = s.settings?.display === "CAD" ? "local" : "loan";
   st.settings.onboarded = true;
   return st;
@@ -173,44 +175,72 @@ export function MuktProvider({ children }) {
     return all[0]?.rate || null;
   }, [state.settings.rate, state.payments, state.borrowings]);
 
-  // Quiet rate refresh on load
-  const refreshRate = useCallback(async (customDate = null) => {
-    const { localCur, loanCur } = state.settings;
-    if (localCur === loanCur) {
-      setState((prev) => ({
-        ...prev,
-        settings: { ...prev.settings, rate: 1, rateDate: todayISO() },
-      }));
-      return 1;
-    }
+  // Exchange rate fetcher
+  const autoFetchedDateRef = useRef(null);
 
-    setIsFetchingRate(true);
-    try {
-      const res = await fetchExchangeRate(localCur, loanCur, customDate);
-      setState((prev) => ({
-        ...prev,
-        settings: {
-          ...prev.settings,
-          rate: r4(res.rate),
-          rateDate: res.date || todayISO(),
-        },
-      }));
-      showToast(`Exchange rate updated: 1 ${localCur} = ${r2(res.rate)} ${loanCur}`);
-      return res.rate;
-    } catch {
-      showToast("Could not fetch latest rate. Try manual rate in Settings.", "error");
-      return null;
-    } finally {
-      setIsFetchingRate(false);
-    }
-  }, [state.settings, showToast]);
+  const refreshRate = useCallback(
+    async (customDate = null, silent = false) => {
+      const { localCur, loanCur } = state.settings;
+      if (localCur === loanCur) {
+        setState((prev) => ({
+          ...prev,
+          settings: {
+            ...prev.settings,
+            rate: 1,
+            rateDate: todayISO(),
+            rateLastFetched: todayISO(),
+          },
+        }));
+        return 1;
+      }
 
-  // Auto-fetch rate on initial mount if not updated today
+      setIsFetchingRate(true);
+      try {
+        const res = await fetchExchangeRate(localCur, loanCur, customDate);
+        setState((prev) => ({
+          ...prev,
+          settings: {
+            ...prev.settings,
+            rate: r4(res.rate),
+            rateDate: res.date || todayISO(),
+            rateLastFetched: todayISO(),
+          },
+        }));
+        if (!silent) {
+          showToast(`Exchange rate updated: 1 ${localCur} = ${r2(res.rate)} ${loanCur}`);
+        }
+        return res.rate;
+      } catch {
+        setState((prev) => ({
+          ...prev,
+          settings: {
+            ...prev.settings,
+            rateLastFetched: todayISO(),
+          },
+        }));
+        if (!silent) {
+          showToast("Could not fetch latest rate. Try manual rate in Settings.", "error");
+        }
+        return null;
+      } finally {
+        setIsFetchingRate(false);
+      }
+    },
+    [state.settings.localCur, state.settings.loanCur, showToast]
+  );
+
+  // Auto-fetch rate once per calendar day quietly when onboarded
   useEffect(() => {
-    if (state.settings.onboarded && state.settings.rateDate !== todayISO()) {
-      refreshRate();
+    const today = todayISO();
+    if (
+      state.settings.onboarded &&
+      state.settings.rateLastFetched !== today &&
+      autoFetchedDateRef.current !== today
+    ) {
+      autoFetchedDateRef.current = today;
+      refreshRate(null, true);
     }
-  }, [state.settings.onboarded, state.settings.rateDate, refreshRate]);
+  }, [state.settings.onboarded, state.settings.rateLastFetched, refreshRate]);
 
   // Comprehensive calculations
   const calc = useMemo(() => {
@@ -489,6 +519,47 @@ export function MuktProvider({ children }) {
     [state.payments, state.borrowings, showToast, closeModal]
   );
 
+  // Atomic onboarding completion
+  const completeOnboarding = useCallback(
+    ({ userName, loanCur, localCur, stakeholders = [] }) => {
+      setState((prev) => {
+        const nextPeople = prev.people.map((p) =>
+          p.id === "me" && userName ? { ...p, name: userName.trim().slice(0, 40) } : p
+        );
+
+        const existingNames = new Set(nextPeople.map((p) => p.name.toLowerCase()));
+        stakeholders.forEach((sName, idx) => {
+          const clean = (sName || "").trim();
+          if (clean && !existingNames.has(clean.toLowerCase())) {
+            existingNames.add(clean.toLowerCase());
+            nextPeople.push({
+              id: uid(),
+              name: clean.slice(0, 40),
+              color: COLORS[(nextPeople.length) % COLORS.length],
+            });
+          }
+        });
+
+        return {
+          ...prev,
+          people: nextPeople,
+          settings: {
+            ...prev.settings,
+            loanCur,
+            localCur,
+            onboarded: true,
+            rateLastFetched: todayISO(),
+          },
+        };
+      });
+
+      showToast("Welcome to Mukt! Your loan tracker is ready.");
+      triggerConfetti();
+      closeModal();
+    },
+    [showToast, triggerConfetti, closeModal]
+  );
+
   // Settings update
   const updateSettings = useCallback(
     (newSettings) => {
@@ -654,6 +725,7 @@ export function MuktProvider({ children }) {
         updatePerson,
         deletePerson,
         updateSettings,
+        completeOnboarding,
         loadDemo,
         wipeAll,
         exportJSON,
