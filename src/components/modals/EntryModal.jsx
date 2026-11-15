@@ -603,28 +603,78 @@ export function EntryModal({ data }) {
           )}
 
           {/* Date & Rate */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isSameCurrency ? "1fr" : "1fr 1fr",
+              gap: "10px",
+              alignItems: "end",
+            }}
+          >
             <div>
-              <label
-                htmlFor="entry-date"
+              <div
                 style={{
-                  fontSize: "0.75rem",
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  color: "var(--text-dim)",
-                  display: "block",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
                   marginBottom: "4px",
                 }}
               >
-                Date
-              </label>
+                <label
+                  htmlFor="entry-date"
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    color: "var(--text-dim)",
+                    display: "block",
+                  }}
+                >
+                  Date
+                </label>
+                {date !== todayISO() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setDate(todayISO());
+                    }}
+                    style={{
+                      fontSize: "0.6875rem",
+                      fontWeight: 700,
+                      color: "var(--accent)",
+                      padding: "1px 6px",
+                      borderRadius: "var(--radius-full)",
+                      backgroundColor: "var(--accent-light)",
+                      border: "none",
+                      cursor: "pointer",
+                      lineHeight: "1.2",
+                    }}
+                  >
+                    Today
+                  </button>
+                )}
+              </div>
               <input
                 id="entry-date"
                 type="date"
                 value={date}
                 max={todayISO()}
                 onChange={(e) => setDate(e.target.value)}
-                className="form-input"
+                onClick={(e) => {
+                  try {
+                    e.target.showPicker?.();
+                  } catch {}
+                }}
+                className="form-input date-input"
+                style={{
+                  height: "44px",
+                  minHeight: "44px",
+                  padding: "10px 10px 10px 12px",
+                  fontSize: "0.875rem",
+                  fontWeight: 600,
+                  width: "100%",
+                }}
               />
             </div>
 
@@ -656,7 +706,12 @@ export function EntryModal({ data }) {
                     }}
                     className="form-input num amount-input"
                     style={{
-                      paddingRight: "34px",
+                      height: "44px",
+                      minHeight: "44px",
+                      padding: "10px 34px 10px 12px",
+                      fontSize: "0.875rem",
+                      fontWeight: 600,
+                      width: "100%",
                       MozAppearance: "textfield",
                       WebkitAppearance: "none",
                       appearance: "textfield",
