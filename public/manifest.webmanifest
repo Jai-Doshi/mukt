@@ -1,0 +1,30 @@
+{
+  "id": "./",
+  "name": "Mukt · Education Loan Tracker",
+  "short_name": "Mukt",
+  "description": "Track your education loan: what you borrowed and from whom, every repayment and who made it, in two currencies with the exchange rate of the day. Private, offline, no account.",
+  "start_url": "./#overview",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "background_color": "#0a0c0f",
+  "theme_color": "#08875f",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["finance", "productivity", "education"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    { "src": "screenshots/mobile.png", "sizes": "469x1015", "type": "image/png", "form_factor": "narrow", "label": "Outstanding balance, who has paid, and your loan-free date" },
+    { "src": "screenshots/desktop.png", "sizes": "800x500", "type": "image/png", "form_factor": "wide", "label": "Dashboard with monthly repayments by person" }
+  ],
+  "shortcuts": [
+    { "name": "Repayments", "short_name": "Repayments", "url": "./#payments", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Borrowings", "short_name": "Borrowings", "url": "./#borrowed", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
