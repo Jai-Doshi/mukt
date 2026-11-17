@@ -8,6 +8,7 @@ import { RepaymentsChart } from "./RepaymentsChart";
 import { ContributionsCard } from "./ContributionsCard";
 import { LendersCard } from "./LendersCard";
 import { RecentActivity } from "./RecentActivity";
+import { InterestBurnBanner } from "./InterestBurnBanner";
 
 export function OverviewView() {
   const { state, openModal, loadDemo, getPerson } = useMukt();
@@ -130,6 +131,9 @@ export function OverviewView() {
               <PayoffCard />
             </div>
           </div>
+
+          {/* Floating Interest & Daily Burn Banner */}
+          <InterestBurnBanner />
 
           {/* KPI Metrics Strip */}
           <KpiGrid />

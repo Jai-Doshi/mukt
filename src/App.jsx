@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { AuthProvider } from "./context/AuthContext";
 import { MuktProvider, useMukt } from "./context/MuktContext";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { Sidebar } from "./components/layout/Sidebar";
@@ -10,6 +11,7 @@ import { BorrowingsView } from "./components/ledger/BorrowingsView";
 import { SettingsView } from "./components/settings/SettingsView";
 import { MobileOverview } from "./components/mobile/MobileOverview";
 import { MobileLedger } from "./components/mobile/MobileLedger";
+import { MobileAuthPage } from "./components/mobile/MobileAuthPage";
 import { ModalHost } from "./components/modals/ModalHost";
 import { Toast } from "./components/common/Toast";
 import { Preloader } from "./components/common/Preloader";
@@ -23,6 +25,8 @@ function AppContent() {
     setIsLoading(false);
   }, []);
 
+  const isAuthPage = isMobile && activeTab === "auth";
+
   return (
     <>
       {isLoading && <Preloader onFinish={handleFinishPreloader} />}
@@ -33,10 +37,13 @@ function AppContent() {
         {/* Main Content Area */}
         <div className="main-viewport">
           {/* Mobile Frosted Header */}
-          {isMobile && <MobileHeader />}
+          {isMobile && !isAuthPage && <MobileHeader />}
 
           {/* View Switcher: Dedicated Native Mobile vs Executive Desktop */}
           <main tabIndex={-1} style={{ outline: "none", minHeight: "100vh" }}>
+            {activeTab === "auth" &&
+              (isMobile ? <MobileAuthPage /> : <OverviewView />)}
+
             {activeTab === "overview" &&
               (isMobile ? <MobileOverview /> : <OverviewView />)}
 
@@ -50,11 +57,11 @@ function AppContent() {
           </main>
 
           {/* Mobile Bottom Navigation */}
-          {isMobile && <BottomNav />}
+          {isMobile && !isAuthPage && <BottomNav />}
         </div>
 
         {/* Global Modals & Notifications */}
-        <ModalHost />
+        {!isAuthPage && <ModalHost />}
         <Toast />
       </div>
     </>
@@ -63,8 +70,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <MuktProvider>
-      <AppContent />
-    </MuktProvider>
+    <AuthProvider>
+      <MuktProvider>
+        <AppContent />
+      </MuktProvider>
+    </AuthProvider>
   );
 }

@@ -10,26 +10,33 @@ export function LendersCard() {
   const isLocal = display === "local";
   const currency = isLocal ? state.settings.localCur : state.settings.loanCur;
 
-  const lenders = [
-    ...new Set([
-      ...Object.keys(calc.byLender),
-      ...Object.keys(calc.paidTo),
-    ]),
-  ]
-    .map((id) => {
-      const b = calc.byLender[id] || { loan: 0, local: 0 };
-      const pd = calc.paidTo[id] || { loan: 0, local: 0 };
-      const leftLoan = Math.max(0, b.loan - pd.loan);
-      const pct = b.loan > 0 ? Math.min(100, (pd.loan / b.loan) * 100) : 100;
-      return {
-        person: getPerson(id),
-        b,
-        pd,
-        leftLoan,
-        pct,
-      };
-    })
-    .sort((a, z) => z.leftLoan - a.leftLoan);
+  const lenders = calc.lendersList && calc.lendersList.length > 0
+    ? calc.lendersList
+    : [
+        ...new Set([
+          ...Object.keys(calc.byLender),
+          ...Object.keys(calc.paidTo),
+        ]),
+      ]
+        .map((id) => {
+          const b = calc.byLender[id] || { loan: 0, local: 0 };
+          const pd = calc.paidTo[id] || { loan: 0, local: 0 };
+          const leftLoan = Math.max(0, b.loan - pd.loan);
+          const pct = b.loan > 0 ? Math.min(100, (pd.loan / b.loan) * 100) : 100;
+          return {
+            id,
+            person: getPerson(id),
+            b,
+            pd,
+            leftLoan,
+            pct,
+            isCleared: leftLoan < 1,
+            isBank: false,
+            indirectLoan: 0,
+            interestAccrued: 0,
+          };
+        })
+        .sort((a, z) => z.leftLoan - a.leftLoan);
 
   return (
     <div
@@ -105,16 +112,34 @@ export function LendersCard() {
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <Avatar person={l.person} size="sm" />
                     <div>
-                      <span
-                        style={{
-                          fontSize: "0.875rem",
-                          fontWeight: 700,
-                          color: "var(--text-main)",
-                          display: "block",
-                        }}
-                      >
-                        {l.person.name}
-                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span
+                          style={{
+                            fontSize: "0.875rem",
+                            fontWeight: 700,
+                            color: "var(--text-main)",
+                            display: "block",
+                          }}
+                        >
+                          {l.person.name}
+                        </span>
+                        {l.isBank && l.interestAccrued > 0 && (
+                          <span
+                            className="badge badge-warning"
+                            style={{ fontSize: "0.625rem", padding: "1px 6px" }}
+                          >
+                            Floating Int
+                          </span>
+                        )}
+                        {l.indirectPaidLoan > 0 && (
+                          <span
+                            className="badge badge-accent"
+                            style={{ fontSize: "0.625rem", padding: "1px 6px" }}
+                          >
+                            Paid Bank for you
+                          </span>
+                        )}
+                      </div>
                       <span
                         className="num"
                         style={{
@@ -124,6 +149,11 @@ export function LendersCard() {
                       >
                         Repaid {formatMoney(l.pd[display], currency, { round: true })} of{" "}
                         {formatMoney(l.b[display], currency, { round: true })}
+                        {l.indirectPaidLoan > 0 && (
+                          <span style={{ color: "var(--text-muted)" }}>
+                            {" "}(incl. {formatMoney(isLocal && calc.rate ? l.indirectPaidLoan / calc.rate : l.indirectPaidLoan, currency, { round: true })} to Bank)
+                          </span>
+                        )}
                       </span>
                     </div>
                   </div>

@@ -1,13 +1,19 @@
 import React from "react";
-import { Plus, Sparkles, SlidersHorizontal, RefreshCw } from "lucide-react";
+import { Plus, Sparkles, SlidersHorizontal, RefreshCw, User, LogIn } from "lucide-react";
 import { useMukt } from "../../context/MuktContext";
+import { useAuth } from "../../context/AuthContext";
 import { CurrencySwitch } from "../common/CurrencySwitch";
 import { Avatar } from "../common/Avatar";
 import { triggerHaptic } from "../../utils/haptics";
+import { initials } from "../../constants";
 
 export function MobileHeader() {
-  const { activeTab, openModal, state, getPerson } = useMukt();
+  const { activeTab, openModal, state, getPerson, changeTab } = useMukt();
+  const { user, isAuthenticated } = useAuth();
   const me = getPerson("me");
+
+  const displayName = user?.user_metadata?.name || me?.name || user?.email?.split("@")[0] || "Me";
+  const userInitials = initials(displayName.replace(/[._-]+/g, " "));
 
   const titles = {
     overview: "Mukt",
@@ -87,7 +93,64 @@ export function MobileHeader() {
 
       {/* Header Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <CurrencySwitch compact />
+        <CurrencySwitch compact flagsOnly />
+
+        {/* Auth User Pill */}
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic("light");
+            if (isAuthenticated) {
+              changeTab("settings");
+            } else {
+              changeTab("auth");
+            }
+          }}
+          style={{
+            height: "34px",
+            padding: isAuthenticated ? "0 8px" : "0 10px",
+            borderRadius: "var(--radius-full)",
+            backgroundColor: "var(--bg-sunken)",
+            border: "1px solid var(--border-card)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            color: isAuthenticated ? "var(--text-main)" : "var(--accent)",
+            fontSize: "0.75rem",
+            fontWeight: 700,
+          }}
+          aria-label={isAuthenticated ? `Account settings for ${displayName}` : "Sign in"}
+          title={isAuthenticated ? displayName : "Sign in"}
+        >
+          {isAuthenticated ? (
+            <>
+              <span
+                style={{
+                  width: "6px",
+                  height: "6px",
+                  borderRadius: "50%",
+                  backgroundColor: "var(--success)",
+                  boxShadow: "0 0 6px var(--success)",
+                }}
+              />
+              <span
+                style={{
+                  fontSize: "0.75rem",
+                  fontWeight: 800,
+                  letterSpacing: "0.03em",
+                  color: "var(--text-main)",
+                }}
+              >
+                {userInitials}
+              </span>
+            </>
+          ) : (
+            <>
+              <LogIn size={13} />
+              <span>Sign In</span>
+            </>
+          )}
+        </button>
 
         <button
           className="btn btn-primary"

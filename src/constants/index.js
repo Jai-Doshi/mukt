@@ -37,12 +37,39 @@ export const REASONS = [
 export const MODES = [
   "Bank transfer",
   "UPI",
+  "Remitly Transfer",
   "International wire",
   "Auto-debit (EMI)",
   "Card",
   "Cash",
   "Other",
 ];
+
+export const CURRENCY_FLAGS = {
+  INR: "🇮🇳",
+  CAD: "🇨🇦",
+  USD: "🇺🇸",
+  GBP: "🇬🇧",
+  EUR: "🇪🇺",
+  AUD: "🇦🇺",
+  NZD: "🇳🇿",
+  SGD: "🇸🇬",
+  HKD: "🇭🇰",
+  JPY: "🇯🇵",
+  CNY: "🇨🇳",
+  KRW: "🇰🇷",
+  CHF: "🇨🇭",
+  SEK: "🇸🇪",
+  NOK: "🇳🇴",
+  DKK: "🇩🇰",
+  PLN: "🇵🇱",
+  CZK: "🇨🇿",
+  HUF: "🇭🇺",
+  BRL: "🇧🇷",
+  MXN: "🇲🇽",
+  ZAR: "🇿🇦",
+  AED: "🇦🇪",
+};
 
 export const CURRENCIES = {
   INR: "Indian rupee",

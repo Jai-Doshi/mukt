@@ -10,13 +10,18 @@ import {
   Banknote,
   MoreHorizontal,
   Coins,
+  Send,
 } from "lucide-react";
 import { triggerHaptic } from "../../utils/haptics";
+import { FlagIcon } from "./FlagIcon";
+import { CURRENCIES } from "../../constants";
 
 // Icon mapping for financial methods
 const METHOD_ICONS = {
   "Bank transfer": Landmark,
   "UPI": Smartphone,
+  "Remitly Transfer": Send,
+  "Remitly": Send,
   "International wire": Globe,
   "Auto-debit (EMI)": Clock,
   "Card": CreditCard,
@@ -34,21 +39,27 @@ export function CustomSelect({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
+  const menuRef = useRef(null);
 
   // Normalize options into { value, label, icon }
   const normalizedOptions = options.map((opt) => {
+    const rawVal = typeof opt === "string" ? opt : opt.value ?? opt.label;
+    const isCurrency = Boolean(CURRENCIES[rawVal]);
     if (typeof opt === "string") {
       return {
         value: opt,
         label: opt,
-        icon: METHOD_ICONS[opt] || null,
+        icon: isCurrency ? null : (METHOD_ICONS[opt] || null),
+        isCurrency,
       };
     }
     return {
       value: opt.value ?? opt.label,
       label: opt.label ?? opt.value,
-      icon: opt.icon || METHOD_ICONS[opt.value] || null,
+      icon: opt.icon || (isCurrency ? null : (METHOD_ICONS[opt.value] || null)),
       sublabel: opt.sublabel || null,
+      color: opt.color || null,
+      isCurrency,
     };
   });
 
@@ -57,14 +68,18 @@ export function CustomSelect({
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleOutsideClick = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target) &&
+        (!menuRef.current || !menuRef.current.contains(e.target))
+      ) {
         setIsOpen(false);
       }
     };
 
     if (isOpen) {
       document.addEventListener("mousedown", handleOutsideClick);
-      document.addEventListener("touchstart", handleOutsideClick);
+      document.addEventListener("touchstart", handleOutsideClick, { passive: true });
     }
     return () => {
       document.removeEventListener("mousedown", handleOutsideClick);
@@ -78,7 +93,12 @@ export function CustomSelect({
     <div
       ref={containerRef}
       className={`custom-select-container ${className}`}
-      style={{ position: "relative", width: "100%", ...style }}
+      style={{
+        position: "relative",
+        width: "100%",
+        zIndex: isOpen ? 60 : undefined,
+        ...style,
+      }}
     >
       {/* Trigger Button */}
       <button
@@ -109,14 +129,18 @@ export function CustomSelect({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-          {SelectedIcon ? (
+          {selectedOption?.isCurrency ? (
+            <FlagIcon code={selectedOption.value} size={20} />
+          ) : SelectedIcon ? (
             <span
               style={{
                 width: "24px",
                 height: "24px",
                 borderRadius: "6px",
-                backgroundColor: "var(--accent-light)",
-                color: "var(--accent)",
+                backgroundColor: selectedOption.color
+                  ? `color-mix(in srgb, ${selectedOption.color} 20%, transparent)`
+                  : "var(--accent-light)",
+                color: selectedOption.color || "var(--accent)",
                 display: "grid",
                 placeItems: "center",
                 flexShrink: 0,
@@ -168,7 +192,13 @@ export function CustomSelect({
       {/* Popover Dropdown Menu */}
       {isOpen && (
         <div
+          ref={menuRef}
           role="listbox"
+          className="custom-select-menu"
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
@@ -176,14 +206,17 @@ export function CustomSelect({
             right: 0,
             zIndex: 1050,
             backgroundColor: "var(--bg-card-solid)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
+            backdropFilter: "blur(24px)",
+            WebkitBackdropFilter: "blur(24px)",
             border: "1px solid var(--border-strong)",
             borderRadius: "var(--radius-md)",
             boxShadow: "0 12px 32px rgba(0, 0, 0, 0.55)",
             padding: "6px",
-            maxHeight: "260px",
+            maxHeight: "230px",
             overflowY: "auto",
+            overscrollBehavior: "contain",
+            WebkitOverflowScrolling: "touch",
+            touchAction: "pan-y",
             animation: "selectMenuFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards",
           }}
         >
@@ -191,6 +224,23 @@ export function CustomSelect({
             @keyframes selectMenuFadeIn {
               from { opacity: 0; transform: translateY(-4px) scale(0.98); }
               to { opacity: 1; transform: translateY(0) scale(1); }
+            }
+            .custom-select-menu {
+              scrollbar-width: thin;
+              scrollbar-color: var(--border-strong) transparent;
+            }
+            .custom-select-menu::-webkit-scrollbar {
+              width: 6px;
+            }
+            .custom-select-menu::-webkit-scrollbar-track {
+              background: transparent;
+            }
+            .custom-select-menu::-webkit-scrollbar-thumb {
+              background: var(--border-strong);
+              border-radius: 9999px;
+            }
+            .custom-select-menu::-webkit-scrollbar-thumb:hover {
+              background: var(--text-dim);
             }
           `}</style>
 
@@ -236,22 +286,26 @@ export function CustomSelect({
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-                  {OptIcon ? (
+                  {opt.isCurrency ? (
+                    <FlagIcon code={opt.value} size={18} />
+                  ) : OptIcon ? (
                     <span
                       style={{
-                        width: "22px",
-                        height: "22px",
-                        borderRadius: "5px",
+                        width: "24px",
+                        height: "24px",
+                        borderRadius: "6px",
                         backgroundColor: isSelected
-                          ? "var(--accent)"
+                          ? (opt.color || "var(--accent)")
+                          : opt.color
+                          ? `color-mix(in srgb, ${opt.color} 18%, var(--bg-sunken))`
                           : "var(--bg-sunken)",
-                        color: isSelected ? "#fff" : "var(--text-dim)",
+                        color: isSelected ? "#fff" : (opt.color || "var(--text-dim)"),
                         display: "grid",
                         placeItems: "center",
                         flexShrink: 0,
                       }}
                     >
-                      <OptIcon size={13} />
+                      <OptIcon size={14} />
                     </span>
                   ) : null}
 

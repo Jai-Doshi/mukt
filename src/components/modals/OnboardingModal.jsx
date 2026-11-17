@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import { Users, Globe, Flag, Lock, Plus, X, Sparkles, ArrowRight, Check } from "lucide-react";
 import { useMukt } from "../../context/MuktContext";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { CURRENCIES, COLORS } from "../../constants";
 import { Avatar } from "../common/Avatar";
 import { CustomSelect } from "../common/CustomSelect";
 
 export function OnboardingModal() {
-  const { state, completeOnboarding, loadDemo, closeModal } = useMukt();
+  const { state, completeOnboarding, loadDemo, closeModal, openModal, changeTab } = useMukt();
+  const isMobile = useIsMobile(991);
 
   const [step, setStep] = useState(0);
   const [name, setName] = useState(state.people.find((p) => p.id === "me")?.name || "");
@@ -235,6 +237,21 @@ export function OnboardingModal() {
               >
                 <span>Get Started</span>
                 <ArrowRight size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  closeModal();
+                  if (isMobile) {
+                    changeTab("auth");
+                  } else {
+                    openModal("auth", { mode: "signin" });
+                  }
+                }}
+                style={{ fontSize: "0.8125rem", color: "var(--accent)", fontWeight: 700 }}
+              >
+                Already have an account? Sign In
               </button>
               <button
                 className="btn btn-ghost"

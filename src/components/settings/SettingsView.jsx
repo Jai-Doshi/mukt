@@ -4,6 +4,8 @@ import {
   Palette,
   Globe,
   Database,
+  Cloud,
+  CheckCircle2,
   Download,
   Upload,
   Table,
@@ -16,8 +18,20 @@ import {
   Sun,
   Moon,
   Laptop,
+  LogIn,
+  LogOut,
+  KeyRound,
+  Flame,
+  Percent,
+  Edit2,
+  ShieldCheck,
+  Calendar,
+  Landmark,
+  Building2,
 } from "lucide-react";
 import { useMukt } from "../../context/MuktContext";
+import { useAuth } from "../../context/AuthContext";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import {
   CURRENCIES,
   THEME_ACCENTS,
@@ -27,19 +41,31 @@ import {
   APP_VERSION,
 } from "../../constants";
 import { Avatar } from "../common/Avatar";
+import { CustomSelect } from "../common/CustomSelect";
 
 export function SettingsView() {
+  const isMobile = useIsMobile(991);
   const {
     state,
     calc,
     openModal,
+    changeTab,
     updateSettings,
+    updateInterestConfig,
+    deleteInterestRateRevision,
     loadDemo,
     wipeAll,
     exportJSON,
     exportCSV,
     restoreJSON,
+    isSupabaseConfigured,
+    isSyncing,
+    lastSynced,
+    cloudHealth,
+    syncToCloud,
+    fetchFromCloud,
   } = useMukt();
+  const { user, isAuthenticated, signOut } = useAuth();
 
   const fileInputRef = useRef(null);
 
@@ -415,6 +441,327 @@ export function SettingsView() {
                   <ChevronRight size={16} style={{ color: "var(--text-dim)" }} />
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Bank Loan & Floating Interest Card */}
+          <div className="glass-card" style={{ padding: "20px 24px", overflow: "visible", position: "relative", zIndex: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Flame size={18} style={{ color: "#ef4444" }} />
+                <h3 style={{ fontSize: "1rem", fontWeight: 700 }}>Bank Loan & Floating Interest</h3>
+              </div>
+
+              {/* Toggle Enable/Disable */}
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  cursor: "pointer",
+                  gap: "8px",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(state.interestConfig?.enabled)}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    const lenders = state.people.filter((p) => p.id !== "me");
+                    const lenderId = state.interestConfig?.lenderId || lenders[0]?.id || null;
+                    updateInterestConfig({ enabled, lenderId });
+                  }}
+                  style={{ display: "none" }}
+                />
+                <div
+                  style={{
+                    width: "40px",
+                    height: "22px",
+                    borderRadius: "12px",
+                    backgroundColor: state.interestConfig?.enabled ? "var(--accent)" : "var(--bg-sunken)",
+                    border: "1px solid var(--border-card)",
+                    position: "relative",
+                    transition: "background 0.2s ease",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "16px",
+                      height: "16px",
+                      borderRadius: "50%",
+                      backgroundColor: "#fff",
+                      position: "absolute",
+                      top: "2px",
+                      left: state.interestConfig?.enabled ? "20px" : "2px",
+                      transition: "left 0.2s ease",
+                    }}
+                  />
+                </div>
+              </label>
+            </div>
+
+            {state.interestConfig?.enabled ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                {/* Select Bank Stakeholder */}
+                <div style={{ position: "relative", zIndex: 25 }}>
+                  <label
+                    style={{
+                      fontSize: "0.75rem",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      color: "var(--text-dim)",
+                      display: "block",
+                      marginBottom: "6px",
+                    }}
+                  >
+                    Associated Bank Lender
+                  </label>
+                  <CustomSelect
+                    value={state.interestConfig?.lenderId || "all"}
+                    onChange={(val) => updateInterestConfig({ lenderId: val })}
+                    options={[
+                      {
+                        value: "all",
+                        label: "All Lenders / Global",
+                        sublabel: "Apply floating interest across total debt",
+                        icon: Globe,
+                        color: "var(--accent)",
+                      },
+                      ...state.people
+                        .filter((p) => p.id !== "me")
+                        .map((p) => {
+                          const isBank = /bank|sbi|hdfc|icici|canara|pnb|axis|credila|avanse|incred|loan|nbfc|baroda|kotak/i.test(
+                            p.name || ""
+                          );
+                          return {
+                            value: p.id,
+                            label: p.name,
+                            sublabel: isBank ? "Bank Institution" : "Personal / Family Lender",
+                            icon: isBank ? Landmark : Users,
+                            color: p.color,
+                          };
+                        }),
+                    ]}
+                    placeholder="Select Bank Lender"
+                  />
+                </div>
+
+                {/* Rates Timeline */}
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", color: "var(--text-dim)" }}>
+                      Floating Rate History
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => openModal("rate-revision")}
+                      style={{ fontSize: "0.75rem", color: "var(--accent)", padding: "2px 8px" }}
+                    >
+                      <Plus size={13} />
+                      <span>Add Revision</span>
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {(state.interestConfig?.rates || []).map((r) => (
+                      <div
+                        key={r.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "8px 12px",
+                          borderRadius: "8px",
+                          backgroundColor: "var(--bg-sunken)",
+                          border: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        <div>
+                          <span style={{ fontWeight: 800, color: "var(--accent)" }}>{r.rate}% p.a.</span>
+                          <span style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginLeft: "8px" }}>
+                            From {r.effectiveDate}
+                          </span>
+                          {r.note && (
+                            <span style={{ fontSize: "0.6875rem", color: "var(--text-dim)", display: "block" }}>
+                              {r.note}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", gap: "4px" }}>
+                          <button
+                            type="button"
+                            onClick={() => openModal("rate-revision", { revision: r })}
+                            style={{ padding: "4px", background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}
+                            title="Edit"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          {(state.interestConfig?.rates?.length || 0) > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => deleteInterestRateRevision(r.id)}
+                              style={{ padding: "4px", background: "none", border: "none", color: "var(--danger)", cursor: "pointer" }}
+                              title="Delete"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* View Full Details Button */}
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => openModal("interest")}
+                  style={{ width: "100%", padding: "10px", marginTop: "4px" }}
+                >
+                  <Flame size={15} style={{ color: "#ef4444" }} />
+                  <span>View Daily Burn & 80E Statement</span>
+                </button>
+              </div>
+            ) : (
+              <p style={{ fontSize: "0.8125rem", color: "var(--text-dim)", lineHeight: 1.5, margin: 0 }}>
+                Calculate exact daily reducing interest, track bank rate changes (repo rate/spread revisions), and verify Section 80E tax deductions.
+              </p>
+            )}
+          </div>
+
+          {/* Supabase Cloud Database Card */}
+          <div className="glass-card" style={{ padding: "20px 24px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Cloud size={18} style={{ color: "var(--accent)" }} />
+                <h3 style={{ fontSize: "1rem", fontWeight: 700 }}>Supabase Cloud Database</h3>
+              </div>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "0.75rem",
+                  fontWeight: 700,
+                  padding: "4px 10px",
+                  borderRadius: "var(--radius-full)",
+                  backgroundColor: cloudHealth?.ready ? "var(--success-light)" : "var(--accent-light)",
+                  color: cloudHealth?.ready ? "var(--success)" : "var(--accent)",
+                }}
+              >
+                <span
+                  style={{
+                    width: "7px",
+                    height: "7px",
+                    borderRadius: "50%",
+                    backgroundColor: cloudHealth?.ready ? "var(--success)" : "var(--accent)",
+                  }}
+                />
+                {cloudHealth?.ready ? "Live Cloud Sync" : isSupabaseConfigured ? "Connected" : "Offline"}
+              </span>
+            </div>
+
+            <p style={{ fontSize: "0.8125rem", color: "var(--text-dim)", marginBottom: "14px", lineHeight: 1.5 }}>
+              Automatic cloud synchronization is enabled with Supabase. Every borrowing, repayment, stakeholder, and setting is backed up in real-time.
+            </p>
+
+            <div
+              style={{
+                padding: "10px 12px",
+                borderRadius: "var(--radius-md)",
+                backgroundColor: "var(--bg-sunken)",
+                border: "1px solid var(--border-subtle)",
+                marginBottom: "14px",
+                fontSize: "0.75rem",
+                color: "var(--text-muted)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "4px" }}>
+                <span style={{ color: "var(--text-dim)" }}>Database URL:</span>
+                <span className="mono" style={{ color: "var(--text-main)", fontWeight: 600, wordBreak: "break-all" }}>
+                  https://brfkvgimozqnlbclumvb.supabase.co
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--text-dim)" }}>Sync State:</span>
+                <span style={{ color: "var(--text-main)" }}>
+                  {lastSynced
+                    ? `Last synced at ${new Date(lastSynced).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+                    : "Real-time sync active"}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "4px", borderTop: "1px solid var(--border-subtle)" }}>
+                <span style={{ color: "var(--text-dim)" }}>Account:</span>
+                {isAuthenticated ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ color: "var(--text-main)", fontWeight: 600 }}>
+                      {user?.email}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={signOut}
+                      style={{
+                        fontSize: "0.6875rem",
+                        color: "var(--danger)",
+                        fontWeight: 700,
+                        padding: "2px 6px",
+                        borderRadius: "4px",
+                        backgroundColor: "var(--danger-light)",
+                      }}
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isMobile) {
+                        changeTab("auth");
+                      } else {
+                        openModal("auth", { mode: "signin" });
+                      }
+                    }}
+                    style={{
+                      fontSize: "0.6875rem",
+                      color: "var(--accent)",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: "var(--radius-full)",
+                      backgroundColor: "var(--accent-light)",
+                    }}
+                  >
+                    Sign In / Register
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={syncToCloud}
+                disabled={isSyncing}
+                style={{ flex: 1, padding: "9px 14px", fontSize: "0.8125rem" }}
+              >
+                <RefreshCw size={14} style={{ animation: isSyncing ? "spin 1s linear infinite" : "none" }} />
+                <span>{isSyncing ? "Syncing..." : "Push Local Data to Cloud"}</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={fetchFromCloud}
+                disabled={isSyncing}
+                style={{ flex: 1, padding: "9px 14px", fontSize: "0.8125rem" }}
+              >
+                <Download size={14} />
+                <span>Pull from Cloud</span>
+              </button>
             </div>
           </div>
 

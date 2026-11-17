@@ -19,11 +19,17 @@ export function KpiGrid() {
       icon: ArrowDownLeft,
       color: "var(--info)",
       mainValue: formatMoney(calc.borrowed[display], currency, { round: true }),
-      subValue: `${state.borrowings.length} entries · ${formatMoney(
-        calc.borrowed[isLocal ? "loan" : "local"],
-        otherCurrency,
-        { round: true }
-      )}`,
+      subValue: calc.totalAccruedInterest > 0
+        ? `${state.borrowings.length} entries · +${formatMoney(
+            isLocal && calc.rate ? calc.totalAccruedInterest / calc.rate : calc.totalAccruedInterest,
+            currency,
+            { round: true }
+          )} interest`
+        : `${state.borrowings.length} entries · ${formatMoney(
+            calc.borrowed[isLocal ? "loan" : "local"],
+            otherCurrency,
+            { round: true }
+          )}`,
     },
     {
       id: "paid",

@@ -126,6 +126,52 @@ export function HeroBalanceCard() {
             {secondaryAmount}
           </div>
         )}
+
+        {/* Live Principal & Accrued Interest Breakdown */}
+        {calc.interest?.enabled && !isLoanFree && calc.interestBreakdown && (
+          <div
+            onClick={() => openModal("interest")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "10px",
+              marginTop: "10px",
+              padding: "5px 12px",
+              borderRadius: "var(--radius-full)",
+              backgroundColor: "var(--bg-sunken)",
+              border: "1px solid var(--border-subtle)",
+              fontSize: "0.75rem",
+              cursor: "pointer",
+            }}
+            title="Click to view floating interest rate history, daily burn & 80E tax deduction"
+          >
+            <span style={{ color: "var(--text-dim)" }}>
+              Principal:{" "}
+              <strong style={{ color: "var(--text-main)" }}>
+                {formatMoney(
+                  isLocal && calc.rate
+                    ? calc.interestBreakdown.totalPrincipalRemaining / calc.rate
+                    : calc.interestBreakdown.totalPrincipalRemaining,
+                  currency,
+                  { round: true }
+                )}
+              </strong>
+            </span>
+            <span style={{ color: "var(--border-strong)" }}>•</span>
+            <span style={{ color: "var(--warning)" }}>
+              Accrued Interest:{" "}
+              <strong style={{ color: "var(--warning)" }}>
+                {formatMoney(
+                  isLocal && calc.rate
+                    ? calc.interestBreakdown.accruedInterest / calc.rate
+                    : calc.interestBreakdown.accruedInterest,
+                  currency,
+                  { round: true }
+                )}
+              </strong>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Contributor Progress Track */}

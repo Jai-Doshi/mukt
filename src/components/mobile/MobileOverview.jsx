@@ -13,6 +13,7 @@ import {
 import { useMukt } from "../../context/MuktContext";
 import { formatMoney, formatCompact, monthName, fmtDate, rateFmt } from "../../constants";
 import { Avatar } from "../common/Avatar";
+import { InterestBurnBanner } from "../overview/InterestBurnBanner";
 import { Sparkline } from "../common/Sparkline";
 import { triggerHaptic } from "../../utils/haptics";
 
@@ -67,23 +68,29 @@ export function MobileOverview() {
   });
 
   // Lenders for Carousel
-  const lenders = [
-    ...new Set([...Object.keys(byLender), ...Object.keys(paidTo)]),
-  ]
-    .map((id) => {
-      const b = byLender[id] || { loan: 0, local: 0 };
-      const pd = paidTo[id] || { loan: 0, local: 0 };
-      const leftLoan = Math.max(0, b.loan - pd.loan);
-      const pctRepaid = b.loan > 0 ? Math.min(100, (pd.loan / b.loan) * 100) : 100;
-      return {
-        person: getPerson(id),
-        b,
-        pd,
-        leftLoan,
-        pctRepaid,
-      };
-    })
-    .sort((a, z) => z.leftLoan - a.leftLoan);
+  const lenders = calc.lendersList && calc.lendersList.length > 0
+    ? calc.lendersList
+    : [
+        ...new Set([...Object.keys(byLender), ...Object.keys(paidTo)]),
+      ]
+        .map((id) => {
+          const b = byLender[id] || { loan: 0, local: 0 };
+          const pd = paidTo[id] || { loan: 0, local: 0 };
+          const leftLoan = Math.max(0, b.loan - pd.loan);
+          const pctRepaid = b.loan > 0 ? Math.min(100, (pd.loan / b.loan) * 100) : 100;
+          return {
+            id,
+            person: getPerson(id),
+            b,
+            pd,
+            leftLoan,
+            pctRepaid,
+            isBank: false,
+            indirectPaidLoan: 0,
+            interestAccrued: 0,
+          };
+        })
+        .sort((a, z) => z.leftLoan - a.leftLoan);
 
   // Mobile Slice for Chart (last 6 or 12)
   const activeChartData = chartData.slice(-chartRange);
@@ -217,6 +224,51 @@ export function MobileOverview() {
               {secondaryAmount}
             </div>
           )}
+
+          {/* Live Principal & Accrued Interest Breakdown */}
+          {calc.interest?.enabled && !isLoanFree && calc.interestBreakdown && (
+            <div
+              onClick={() => openModal("interest")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                marginTop: "8px",
+                padding: "4px 10px",
+                borderRadius: "var(--radius-full)",
+                backgroundColor: "var(--bg-sunken)",
+                border: "1px solid var(--border-subtle)",
+                fontSize: "0.6875rem",
+                cursor: "pointer",
+              }}
+            >
+              <span style={{ color: "var(--text-dim)" }}>
+                Principal:{" "}
+                <strong style={{ color: "var(--text-main)" }}>
+                  {formatMoney(
+                    isLocal && calc.rate
+                      ? calc.interestBreakdown.totalPrincipalRemaining / calc.rate
+                      : calc.interestBreakdown.totalPrincipalRemaining,
+                    currency,
+                    { round: true }
+                  )}
+                </strong>
+              </span>
+              <span style={{ color: "var(--border-strong)" }}>•</span>
+              <span style={{ color: "var(--warning)" }}>
+                Interest:{" "}
+                <strong style={{ color: "var(--warning)" }}>
+                  {formatMoney(
+                    isLocal && calc.rate
+                      ? calc.interestBreakdown.accruedInterest / calc.rate
+                      : calc.interestBreakdown.accruedInterest,
+                    currency,
+                    { round: true }
+                  )}
+                </strong>
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Multi-contributor Progress Track */}
@@ -325,6 +377,9 @@ export function MobileOverview() {
           </button>
         </div>
       </div>
+
+      {/* Floating Interest & Daily Burn Banner */}
+      <InterestBurnBanner />
 
       {/* 2. HORIZON & SPARKLINE CARD */}
       <div
@@ -447,19 +502,38 @@ export function MobileOverview() {
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                       <Avatar person={l.person} size="sm" />
-                      <span
-                        style={{
-                          fontSize: "0.875rem",
-                          fontWeight: 700,
-                          color: "var(--text-main)",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          maxWidth: "100px",
-                        }}
-                      >
-                        {l.person.name}
-                      </span>
+                      <div>
+                        <span
+                          style={{
+                            fontSize: "0.875rem",
+                            fontWeight: 700,
+                            color: "var(--text-main)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            maxWidth: "95px",
+                            display: "block",
+                          }}
+                        >
+                          {l.person.name}
+                        </span>
+                        {l.indirectPaidLoan > 0 && (
+                          <span
+                            className="badge badge-accent"
+                            style={{ fontSize: "0.5625rem", padding: "0 4px" }}
+                          >
+                            Paid Bank
+                          </span>
+                        )}
+                        {l.isBank && l.interestAccrued > 0 && (
+                          <span
+                            className="badge badge-warning"
+                            style={{ fontSize: "0.5625rem", padding: "0 4px" }}
+                          >
+                            Floating Int
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {isCleared && (

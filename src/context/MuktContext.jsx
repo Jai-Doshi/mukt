@@ -12,6 +12,25 @@ import {
 } from "../constants";
 import { generateDemoData } from "../constants/demoData";
 import confetti from "canvas-confetti";
+import { useAuth } from "./AuthContext";
+import { calculateVariableInterest } from "../utils/interestCalculator";
+import { supabase, isSupabaseConfigured } from "../lib/supabase";
+import {
+  fetchFullStateFromSupabase,
+  insertPaymentToSupabase,
+  updatePaymentInSupabase,
+  deletePaymentFromSupabase,
+  insertBorrowingToSupabase,
+  updateBorrowingInSupabase,
+  deleteBorrowingFromSupabase,
+  insertPersonToSupabase,
+  updatePersonInSupabase,
+  deletePersonFromSupabase,
+  upsertSettingsInSupabase,
+  syncAllToSupabase,
+  wipeSupabaseData,
+  checkSupabaseHealth,
+} from "../services/supabaseService";
 
 const MuktContext = createContext(null);
 
@@ -21,6 +40,14 @@ function freshState() {
     people: [{ id: "me", name: "Me", color: COLORS[0] }],
     borrowings: [],
     payments: [],
+    interestConfig: {
+      enabled: false,
+      lenderId: null,
+      rates: [
+        { id: "rate_init", effectiveDate: todayISO(), rate: 9.5, note: "Current floating rate" },
+      ],
+      compounding: "simple",
+    },
     settings: {
       loanCur: "INR",
       localCur: "CAD",
@@ -57,6 +84,23 @@ function migrateLegacy(s) {
   return st;
 }
 
+export function dedupePeople(list) {
+  if (!Array.isArray(list)) return [{ id: "me", name: "Me", color: COLORS[0] }];
+  const seenNames = new Set();
+  const seenIds = new Set();
+  const res = [];
+  list.forEach((p) => {
+    if (!p) return;
+    const nameKey = (p.id === "me" ? "me" : (p.name || "").trim()).toLowerCase();
+    if (!seenNames.has(nameKey) && !seenIds.has(p.id)) {
+      seenNames.add(nameKey);
+      seenIds.add(p.id);
+      res.push(p);
+    }
+  });
+  return res.length > 0 ? res : [{ id: "me", name: "Me", color: COLORS[0] }];
+}
+
 function loadInitialState() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -65,9 +109,10 @@ function loadInitialState() {
       const d = freshState();
       return {
         version: 2,
-        people: s.people?.length ? s.people : d.people,
+        people: dedupePeople(s.people?.length ? s.people : d.people),
         borrowings: s.borrowings || [],
         payments: s.payments || [],
+        interestConfig: s.interestConfig || s.settings?.interestConfig || d.interestConfig,
         settings: { ...d.settings, ...(s.settings || {}) },
       };
     }
@@ -86,17 +131,171 @@ export function MuktProvider({ children }) {
   const [state, setState] = useState(loadInitialState);
   const [activeTab, setActiveTab] = useState(() => {
     const hash = window.location.hash.slice(1);
-    return ["overview", "payments", "borrowed", "settings"].includes(hash) ? hash : "overview";
+    return ["overview", "payments", "borrowed", "settings", "auth"].includes(hash) ? hash : "overview";
   });
   const [toast, setToast] = useState(null);
   const [modal, setModal] = useState(null); // { type, data }
   const [isFetchingRate, setIsFetchingRate] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSynced, setLastSynced] = useState(null);
+  const [cloudHealth, setCloudHealth] = useState({
+    configured: isSupabaseConfigured,
+    ready: false,
+    message: isSupabaseConfigured ? "Connecting to Supabase Cloud..." : "Supabase not configured",
+  });
+
+  const { user } = useAuth();
+
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  // Sync state whenever authenticated user logs in
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+
+    async function loadUserCloudData() {
+      setIsSyncing(true);
+      try {
+        const remote = await fetchFullStateFromSupabase();
+        if (active) {
+          const remoteSettings = remote?.settings || {};
+          const nextSettings = {
+            ...stateRef.current.settings,
+            ...remoteSettings,
+            onboarded: true, // Logging in guarantees onboarded is true
+          };
+
+          const userName = user?.user_metadata?.name || user?.email?.split("@")[0];
+          let nextPeople = remote?.people?.length ? dedupePeople(remote.people) : stateRef.current.people;
+          if (userName && nextPeople.some((p) => p.id === "me" && (p.name === "Me" || !p.name))) {
+            nextPeople = nextPeople.map((p) => (p.id === "me" ? { ...p, name: userName } : p));
+          }
+
+          setState((prev) => ({
+            ...prev,
+            people: dedupePeople(nextPeople),
+            borrowings: remote?.borrowings || prev.borrowings,
+            payments: remote?.payments || prev.payments,
+            interestConfig: remote?.interestConfig || prev.interestConfig,
+            settings: nextSettings,
+          }));
+          setLastSynced(new Date());
+
+          // Persist onboarded: true to Supabase
+          upsertSettingsInSupabase(nextSettings).catch((err) => {
+            console.warn("Supabase settings sync error:", err);
+          });
+        }
+      } catch (err) {
+        console.warn("User data hydration warning:", err);
+      } finally {
+        if (active) setIsSyncing(false);
+      }
+    }
+
+    loadUserCloudData();
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  // Initial check & hydration from Supabase
+  useEffect(() => {
+    let active = true;
+
+    async function initCloud() {
+      if (!isSupabaseConfigured) return;
+
+      try {
+        const health = await checkSupabaseHealth();
+        if (!active) return;
+        setCloudHealth(health);
+
+        if (health.ready) {
+          setIsSyncing(true);
+          const remote = await fetchFullStateFromSupabase();
+          if (!active) return;
+
+          if (remote) {
+            const hasRemoteData =
+              (remote.borrowings && remote.borrowings.length > 0) ||
+              (remote.payments && remote.payments.length > 0) ||
+              Boolean(remote.settings?.onboarded);
+
+            const currentState = stateRef.current;
+            const hasLocalData =
+              currentState.borrowings.length > 0 ||
+              currentState.payments.length > 0 ||
+              currentState.settings.onboarded;
+
+            if (hasRemoteData) {
+              setState((prev) => ({
+                ...prev,
+                people: remote.people?.length ? dedupePeople(remote.people) : prev.people,
+                borrowings: remote.borrowings || [],
+                payments: remote.payments || [],
+                interestConfig: remote.interestConfig || prev.interestConfig,
+                settings: { ...prev.settings, ...(remote.settings || {}) },
+              }));
+              setLastSynced(new Date());
+            } else if (hasLocalData) {
+              // Remote tables are empty, sync local data up to Supabase
+              await syncAllToSupabase(currentState);
+              if (active) setLastSynced(new Date());
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Cloud hydration warning:", err);
+      } finally {
+        if (active) setIsSyncing(false);
+      }
+    }
+
+    initCloud();
+
+    // Setup Supabase Realtime channel for live updates from other devices/tabs
+    let channel = null;
+    if (supabase) {
+      try {
+        channel = supabase
+          .channel("mukt-realtime")
+          .on("postgres_changes", { event: "*", schema: "public" }, () => {
+            fetchFullStateFromSupabase().then((remote) => {
+              if (remote && active) {
+                setState((prev) => ({
+                  ...prev,
+                  people: remote.people?.length ? dedupePeople(remote.people) : prev.people,
+                  borrowings: remote.borrowings || prev.borrowings,
+                  payments: remote.payments || prev.payments,
+                  settings: remote.settings ? { ...prev.settings, ...remote.settings } : prev.settings,
+                }));
+                setLastSynced(new Date());
+              }
+            });
+          })
+          .subscribe();
+      } catch (err) {
+        console.warn("Realtime subscription notice:", err);
+      }
+    }
+
+    return () => {
+      active = false;
+      if (channel) {
+        supabase?.removeChannel(channel);
+      }
+    };
+  }, []);
 
   // Sync hash with activeTab
   useEffect(() => {
     const handleHash = () => {
       const hash = window.location.hash.slice(1);
-      if (["overview", "payments", "borrowed", "settings"].includes(hash)) {
+      if (["overview", "payments", "borrowed", "settings", "auth"].includes(hash)) {
         setActiveTab(hash);
       }
     };
@@ -245,22 +444,162 @@ export function MuktProvider({ children }) {
   // Comprehensive calculations
   const calc = useMemo(() => {
     const sum = (arr, fn) => arr.reduce((acc, item) => acc + (fn(item) || 0), 0);
+    const rate = currentRate;
 
+    // 1. Calculate variable / floating interest for bank loan
+    const interest = calculateVariableInterest({
+      borrowings: state.borrowings,
+      payments: state.payments,
+      interestConfig: state.interestConfig,
+      today: todayISO(),
+      exchangeRate: rate || 1,
+    });
+
+    const isInterestEnabled = Boolean(state.interestConfig?.enabled);
+    const configuredBankId =
+      state.interestConfig?.lenderId && state.interestConfig.lenderId !== "all"
+        ? state.interestConfig.lenderId
+        : (state.borrowings[0]?.fromId || null);
+
+    // 2. Identify all counterparty stakeholders (excluding "me")
+    const candidateIds = new Set([
+      ...state.people.filter((p) => p && p.id !== "me").map((p) => p.id),
+      ...state.borrowings.map((b) => b.fromId).filter(Boolean),
+      ...state.payments.map((p) => p.toId).filter(Boolean),
+      ...state.payments.map((p) => p.payerId).filter((id) => id && id !== "me"),
+    ]);
+
+    // 3. Build per-lender / stakeholder tracking
+    // Handles direct borrowings, floating bank interest, and third-party family assistance (Mom/Dad paying bank)
+    const lendersList = [];
+    const byLender = {};
+    const paidTo = {};
+
+    candidateIds.forEach((id) => {
+      const person = state.people.find((p) => p.id === id) || { id, name: id, color: COLORS[1] };
+      const isBank = Boolean(isInterestEnabled && configuredBankId === id);
+
+      // Direct borrowings taken from this lender
+      const directBorrowings = state.borrowings.filter((b) => b.fromId === id);
+      const directBorrowLoan = sum(directBorrowings, (b) => b.loan);
+      const directBorrowLocal = sum(directBorrowings, (b) => b.local);
+
+      // Third-party payments: this person paid on user's behalf to someone else (e.g. Dad paying Bank)
+      const indirectPayments = state.payments.filter(
+        (p) => p.payerId === id && p.toId !== id && p.toId !== "me"
+      );
+      const indirectPaidLoan = sum(indirectPayments, (p) => p.loan);
+      const indirectPaidLocal = sum(indirectPayments, (p) => p.local);
+
+      // Payments made by user ("me") directly to this person
+      const repaymentsFromMe = state.payments.filter(
+        (p) => p.payerId === "me" && p.toId === id
+      );
+      const repaidByMeLoan = sum(repaymentsFromMe, (p) => p.loan);
+      const repaidByMeLocal = sum(repaymentsFromMe, (p) => p.local);
+
+      // All payments received by this person from all payers (e.g. Bank receiving from Me, Dad, Mom)
+      const allPaymentsToThisLender = state.payments.filter((p) => p.toId === id);
+      const allPaidToThisLenderLoan = sum(allPaymentsToThisLender, (p) => p.loan);
+      const allPaidToThisLenderLocal = sum(allPaymentsToThisLender, (p) => p.local);
+
+      let totalFundedLoan = 0;
+      let totalFundedLocal = 0;
+      let repaidLoan = 0;
+      let repaidLocal = 0;
+      let leftLoan = 0;
+      let leftLocal = 0;
+
+      if (isBank) {
+        // Bank with floating interest
+        totalFundedLoan = directBorrowLoan + (interest.totalInterestAccrued || 0);
+        totalFundedLocal = rate && rate > 0 ? totalFundedLoan / rate : directBorrowLocal;
+        repaidLoan = allPaidToThisLenderLoan;
+        repaidLocal = allPaidToThisLenderLocal;
+        leftLoan = Math.max(0, interest.totalOutstanding);
+        leftLocal = rate && rate > 0 ? leftLoan / rate : 0;
+      } else if (indirectPaidLoan > 0) {
+        // Third-party sponsor (e.g. Dad/Mom who paid to bank on user's behalf)
+        totalFundedLoan = directBorrowLoan + indirectPaidLoan;
+        totalFundedLocal = directBorrowLocal + indirectPaidLocal;
+        repaidLoan = repaidByMeLoan;
+        repaidLocal = repaidByMeLocal;
+        leftLoan = Math.max(0, totalFundedLoan - repaidByMeLoan);
+        leftLocal = rate && rate > 0 ? leftLoan / rate : Math.max(0, totalFundedLocal - repaidByMeLocal);
+      } else {
+        // Direct lender without interest or other family lender
+        totalFundedLoan = directBorrowLoan;
+        totalFundedLocal = directBorrowLocal;
+        repaidLoan = allPaidToThisLenderLoan;
+        repaidLocal = allPaidToThisLenderLocal;
+        leftLoan = Math.max(0, directBorrowLoan - allPaidToThisLenderLoan);
+        leftLocal = rate && rate > 0 ? leftLoan / rate : Math.max(0, directBorrowLocal - allPaidToThisLenderLocal);
+      }
+
+      const pctRepaid = totalFundedLoan > 0 ? Math.min(100, (repaidLoan / totalFundedLoan) * 100) : 100;
+      const isCleared = leftLoan < 1;
+
+      // Populate byLender and paidTo objects for backward compatibility with existing views
+      byLender[id] = {
+        loan: totalFundedLoan,
+        local: totalFundedLocal,
+        count: directBorrowings.length + (indirectPaidLoan > 0 ? indirectPayments.length : 0),
+      };
+      paidTo[id] = {
+        loan: repaidLoan,
+        local: repaidLocal,
+        count: isBank ? allPaymentsToThisLender.length : repaymentsFromMe.length,
+      };
+
+      // Only add to active lenders list if there is financial activity
+      if (totalFundedLoan > 0 || repaidLoan > 0 || leftLoan > 0 || (isBank && interest.hasData)) {
+        lendersList.push({
+          id,
+          person,
+          isBank,
+          isCleared,
+          b: byLender[id],
+          pd: paidTo[id],
+          directBorrowLoan,
+          indirectPaidLoan,
+          interestAccrued: isBank ? (interest.accruedInterest || 0) : 0,
+          leftLoan,
+          leftLocal,
+          pctRepaid,
+          pct: pctRepaid,
+        });
+      }
+    });
+
+    // Sort lenders by outstanding balance descending
+    lendersList.sort((a, b) => b.leftLoan - a.leftLoan);
+
+    // Sum overall remaining across all lenders (Principal + Accrued Unpaid Interest + Family Debt)
+    const remaining = lendersList.reduce((acc, l) => acc + l.leftLoan, 0);
+    const remainingLocal = rate && rate > 0 ? remaining / rate : null;
+
+    // Principal Borrowed
     const borrowed = {
       loan: sum(state.borrowings, (b) => b.loan),
       local: sum(state.borrowings, (b) => b.local),
     };
 
+    // Total Obligation (Borrowed Principal + Accrued Interest)
+    const totalAccruedInterest = isInterestEnabled ? (interest.totalInterestAccrued || 0) : 0;
+    const totalObligationLoan = borrowed.loan + totalAccruedInterest;
+
+    // Repaid
     const paid = {
       loan: sum(state.payments, (p) => p.loan),
       local: sum(state.payments, (p) => p.local),
     };
 
-    const remaining = Math.max(0, borrowed.loan - paid.loan);
-    const rate = currentRate;
-    const remainingLocal = rate && rate > 0 ? remaining / rate : null;
-    const pct = borrowed.loan > 0 ? Math.min(100, Math.max(0, (paid.loan / borrowed.loan) * 100)) : 0;
-    const isLoanFree = remaining <= 0 && borrowed.loan > 0;
+    // Progress percentage
+    const totalCleared = Math.max(0, totalObligationLoan - remaining);
+    const pct = totalObligationLoan > 0 ? Math.min(100, Math.max(0, (totalCleared / totalObligationLoan) * 100)) : 0;
+
+    // Loan-Free condition: MUST have true remaining <= 0 AND have had debt
+    const isLoanFree = remaining <= 0 && (borrowed.loan > 0 || totalObligationLoan > 0);
 
     const group = (arr, key) =>
       arr.reduce((m, x) => {
@@ -272,8 +611,6 @@ export function MuktProvider({ children }) {
       }, {});
 
     const byPayer = group(state.payments, "payerId");
-    const byLender = group(state.borrowings, "fromId");
-    const paidTo = group(state.payments, "toId");
     const byReason = group(
       state.borrowings.map((b) => ({ ...b, reason: b.reason || "Other" })),
       "reason"
@@ -331,11 +668,22 @@ export function MuktProvider({ children }) {
       (a, b) => b.date.localeCompare(a.date) || (b.created || 0) - (a.created || 0)
     ).slice(0, 8);
 
+    // Interest breakdown for UI displays
+    const interestBreakdown = isInterestEnabled ? {
+      accruedInterest: interest.accruedInterest || 0,
+      currentPrincipal: interest.currentPrincipal || 0,
+      totalInterestAccrued: interest.totalInterestAccrued || 0,
+      totalInterestPaid: interest.totalInterestPaid || 0,
+      totalPrincipalRemaining: Math.max(0, remaining - (interest.accruedInterest || 0)),
+    } : null;
+
     return {
       borrowed,
       paid,
       remaining,
       remainingLocal,
+      totalObligationLoan,
+      totalAccruedInterest,
       rate,
       pct,
       isLoanFree,
@@ -348,6 +696,9 @@ export function MuktProvider({ children }) {
       thisYear,
       chartData,
       recentActivity,
+      interest,
+      interestBreakdown,
+      lendersList,
     };
   }, [state, currentRate]);
 
@@ -390,6 +741,10 @@ export function MuktProvider({ children }) {
         ...prev,
         payments: [newPayment, ...prev.payments],
       }));
+      // Async Supabase push
+      insertPaymentToSupabase(newPayment);
+      setLastSynced(new Date());
+
       showToast("Repayment recorded successfully");
       closeModal();
 
@@ -409,6 +764,10 @@ export function MuktProvider({ children }) {
         ...prev,
         payments: prev.payments.map((p) => (p.id === id ? { ...p, ...updates } : p)),
       }));
+      // Async Supabase push
+      updatePaymentInSupabase(id, updates);
+      setLastSynced(new Date());
+
       showToast("Repayment updated");
       closeModal();
     },
@@ -421,6 +780,10 @@ export function MuktProvider({ children }) {
         ...prev,
         payments: prev.payments.filter((p) => p.id !== id),
       }));
+      // Async Supabase delete
+      deletePaymentFromSupabase(id);
+      setLastSynced(new Date());
+
       showToast("Repayment deleted", "info");
       closeModal();
     },
@@ -439,6 +802,10 @@ export function MuktProvider({ children }) {
         ...prev,
         borrowings: [newBorrowing, ...prev.borrowings],
       }));
+      // Async Supabase push
+      insertBorrowingToSupabase(newBorrowing);
+      setLastSynced(new Date());
+
       showToast("Borrowing recorded successfully");
       closeModal();
     },
@@ -451,6 +818,10 @@ export function MuktProvider({ children }) {
         ...prev,
         borrowings: prev.borrowings.map((b) => (b.id === id ? { ...b, ...updates } : b)),
       }));
+      // Async Supabase push
+      updateBorrowingInSupabase(id, updates);
+      setLastSynced(new Date());
+
       showToast("Borrowing updated");
       closeModal();
     },
@@ -463,6 +834,10 @@ export function MuktProvider({ children }) {
         ...prev,
         borrowings: prev.borrowings.filter((b) => b.id !== id),
       }));
+      // Async Supabase delete
+      deleteBorrowingFromSupabase(id);
+      setLastSynced(new Date());
+
       showToast("Borrowing deleted", "info");
       closeModal();
     },
@@ -472,19 +847,29 @@ export function MuktProvider({ children }) {
   // CRUD for People
   const addPerson = useCallback(
     (name, color) => {
+      const clean = (name || "").trim().slice(0, 40);
+      if (!clean) return null;
+      if (state.people.some((p) => p.name.toLowerCase() === clean.toLowerCase())) {
+        showToast(`"${clean}" already exists`, "error");
+        return null;
+      }
       const newPerson = {
         id: uid(),
-        name: name.trim().slice(0, 40),
+        name: clean,
         color: color || COLORS[state.people.length % COLORS.length],
       };
       setState((prev) => ({
         ...prev,
-        people: [...prev.people, newPerson],
+        people: dedupePeople([...prev.people, newPerson]),
       }));
+      // Async Supabase push
+      insertPersonToSupabase(newPerson);
+      setLastSynced(new Date());
+
       showToast(`Added ${newPerson.name}`);
       return newPerson;
     },
-    [state.people.length, showToast]
+    [state.people, showToast]
   );
 
   const updatePerson = useCallback(
@@ -493,6 +878,10 @@ export function MuktProvider({ children }) {
         ...prev,
         people: prev.people.map((p) => (p.id === id ? { ...p, ...updates } : p)),
       }));
+      // Async Supabase push
+      updatePersonInSupabase(id, updates);
+      setLastSynced(new Date());
+
       showToast("Person updated");
       closeModal();
     },
@@ -512,6 +901,10 @@ export function MuktProvider({ children }) {
         ...prev,
         people: prev.people.filter((p) => p.id !== id),
       }));
+      // Async Supabase delete
+      deletePersonFromSupabase(id);
+      setLastSynced(new Date());
+
       showToast("Person removed", "info");
       closeModal();
       return true;
@@ -522,35 +915,53 @@ export function MuktProvider({ children }) {
   // Atomic onboarding completion
   const completeOnboarding = useCallback(
     ({ userName, loanCur, localCur, stakeholders = [] }) => {
+      const cleanUserName = (userName || "").trim().slice(0, 40) || "Me";
+      const mePerson = { id: "me", name: cleanUserName, color: COLORS[0] };
+      const seenNames = new Set([cleanUserName.toLowerCase(), "me"]);
+      const nextPeople = [mePerson];
+
+      stakeholders.forEach((sName) => {
+        const clean = (sName || "").trim().slice(0, 40);
+        if (clean && !seenNames.has(clean.toLowerCase())) {
+          seenNames.add(clean.toLowerCase());
+          nextPeople.push({
+            id: uid(),
+            name: clean,
+            color: COLORS[nextPeople.length % COLORS.length],
+          });
+        }
+      });
+
+      const dedupedPeople = dedupePeople(nextPeople);
+
       setState((prev) => {
-        const nextPeople = prev.people.map((p) =>
-          p.id === "me" && userName ? { ...p, name: userName.trim().slice(0, 40) } : p
-        );
-
-        const existingNames = new Set(nextPeople.map((p) => p.name.toLowerCase()));
-        stakeholders.forEach((sName, idx) => {
-          const clean = (sName || "").trim();
-          if (clean && !existingNames.has(clean.toLowerCase())) {
-            existingNames.add(clean.toLowerCase());
-            nextPeople.push({
-              id: uid(),
-              name: clean.slice(0, 40),
-              color: COLORS[(nextPeople.length) % COLORS.length],
-            });
-          }
-        });
-
+        const nextSettings = {
+          ...prev.settings,
+          loanCur,
+          localCur,
+          onboarded: true,
+          rateLastFetched: todayISO(),
+        };
         return {
           ...prev,
-          people: nextPeople,
-          settings: {
-            ...prev.settings,
-            loanCur,
-            localCur,
-            onboarded: true,
-            rateLastFetched: todayISO(),
-          },
+          people: dedupedPeople,
+          settings: nextSettings,
         };
+      });
+
+      // Synchronize with Supabase outside setState updater
+      syncAllToSupabase({
+        ...stateRef.current,
+        people: dedupedPeople,
+        settings: {
+          ...stateRef.current.settings,
+          loanCur,
+          localCur,
+          onboarded: true,
+          rateLastFetched: todayISO(),
+        },
+      }).then(() => setLastSynced(new Date())).catch((err) => {
+        console.warn("Supabase onboarding sync error:", err);
       });
 
       showToast("Welcome to Mukt! Your loan tracker is ready.");
@@ -562,20 +973,129 @@ export function MuktProvider({ children }) {
 
   // Settings update
   const updateSettings = useCallback(
-    (newSettings) => {
-      setState((prev) => ({
-        ...prev,
-        settings: { ...prev.settings, ...newSettings },
-      }));
-      showToast("Settings saved");
+    (newSettings, toastMessage = "Settings saved") => {
+      setState((prev) => {
+        const nextSettings = { ...prev.settings, ...newSettings };
+        upsertSettingsInSupabase(nextSettings).then(() => setLastSynced(new Date()));
+        return {
+          ...prev,
+          settings: nextSettings,
+        };
+      });
+      if (toastMessage) {
+        showToast(toastMessage);
+      }
     },
     [showToast]
+  );
+
+  // Interest Rate Configuration & Revisions
+  const updateInterestConfig = useCallback(
+    (updates) => {
+      setState((prev) => {
+        const nextConfig = {
+          ...(prev.interestConfig || {}),
+          ...updates,
+        };
+        const nextState = {
+          ...prev,
+          interestConfig: nextConfig,
+        };
+        syncAllToSupabase(nextState).then(() => setLastSynced(new Date())).catch(() => {});
+        return nextState;
+      });
+      showToast("Interest settings saved");
+    },
+    [showToast]
+  );
+
+  const addInterestRateRevision = useCallback(
+    ({ effectiveDate, rate, note }) => {
+      setState((prev) => {
+        const currentRates = prev.interestConfig?.rates || [];
+        const newRate = {
+          id: uid(),
+          effectiveDate: effectiveDate || todayISO(),
+          rate: Number(rate) || 0,
+          note: (note || "").trim(),
+        };
+        const nextRates = [...currentRates, newRate].sort((a, b) =>
+          (a.effectiveDate || "").localeCompare(b.effectiveDate || "")
+        );
+        const nextState = {
+          ...prev,
+          interestConfig: {
+            ...(prev.interestConfig || {}),
+            enabled: true,
+            rates: nextRates,
+          },
+        };
+        syncAllToSupabase(nextState).then(() => setLastSynced(new Date())).catch(() => {});
+        return nextState;
+      });
+      showToast("Interest rate revision added");
+      closeModal();
+    },
+    [showToast, closeModal]
+  );
+
+  const deleteInterestRateRevision = useCallback(
+    (id) => {
+      let allowed = true;
+      setState((prev) => {
+        const currentRates = prev.interestConfig?.rates || [];
+        if (currentRates.length <= 1) {
+          allowed = false;
+          return prev;
+        }
+        const nextRates = currentRates.filter((r) => r.id !== id);
+        const nextState = {
+          ...prev,
+          interestConfig: {
+            ...(prev.interestConfig || {}),
+            rates: nextRates,
+          },
+        };
+        syncAllToSupabase(nextState).then(() => setLastSynced(new Date())).catch(() => {});
+        return nextState;
+      });
+      if (!allowed) {
+        showToast("At least one interest rate entry is required", "error");
+      } else {
+        showToast("Rate revision removed", "info");
+      }
+    },
+    [showToast]
+  );
+
+  const updateInterestRateRevision = useCallback(
+    (id, updates) => {
+      setState((prev) => {
+        const currentRates = prev.interestConfig?.rates || [];
+        const nextRates = currentRates
+          .map((r) => (r.id === id ? { ...r, ...updates } : r))
+          .sort((a, b) => (a.effectiveDate || "").localeCompare(b.effectiveDate || ""));
+        const nextState = {
+          ...prev,
+          interestConfig: {
+            ...(prev.interestConfig || {}),
+            rates: nextRates,
+          },
+        };
+        syncAllToSupabase(nextState).then(() => setLastSynced(new Date())).catch(() => {});
+        return nextState;
+      });
+      showToast("Rate revision updated");
+      closeModal();
+    },
+    [showToast, closeModal]
   );
 
   // Load sample demo data
   const loadDemo = useCallback(() => {
     const demo = generateDemoData(state.settings);
     setState(demo);
+    syncAllToSupabase(demo).then(() => setLastSynced(new Date()));
     showToast("Sample loan dataset loaded!");
     triggerConfetti();
   }, [state.settings, showToast, triggerConfetti]);
@@ -589,6 +1109,7 @@ export function MuktProvider({ children }) {
     fresh.settings.themeAccent = state.settings.themeAccent;
     fresh.settings.onboarded = false;
     setState(fresh);
+    wipeSupabaseData().then(() => setLastSynced(new Date()));
     showToast("All data cleared", "info");
   }, [state.settings, showToast]);
 
@@ -679,13 +1200,15 @@ export function MuktProvider({ children }) {
         if (!Array.isArray(s.people) || !Array.isArray(s.payments) || !Array.isArray(s.borrowings)) {
           throw new Error("Invalid format");
         }
-        setState({
+        const restored = {
           version: 2,
           people: s.people,
           borrowings: s.borrowings,
           payments: s.payments,
           settings: { ...freshState().settings, ...(s.settings || {}), onboarded: true },
-        });
+        };
+        setState(restored);
+        syncAllToSupabase(restored).then(() => setLastSynced(new Date()));
         showToast("Backup restored successfully!");
         triggerConfetti();
         closeModal();
@@ -695,6 +1218,54 @@ export function MuktProvider({ children }) {
     },
     [showToast, triggerConfetti, closeModal]
   );
+
+  // Manual Cloud Sync operations
+  const syncToCloud = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      const res = await syncAllToSupabase(state);
+      if (res.success) {
+        setLastSynced(new Date());
+        showToast("All data synced to Supabase Cloud", "success");
+        return true;
+      } else {
+        showToast(res.error?.message || "Sync failed. Check database tables.", "error");
+        return false;
+      }
+    } catch (err) {
+      showToast("Sync failed: " + err.message, "error");
+      return false;
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [state, showToast]);
+
+  const fetchFromCloud = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      const remote = await fetchFullStateFromSupabase();
+      if (remote && (remote.borrowings?.length || remote.payments?.length || remote.people?.length)) {
+        setState((prev) => ({
+          ...prev,
+          people: remote.people?.length ? remote.people : prev.people,
+          borrowings: remote.borrowings || [],
+          payments: remote.payments || [],
+          settings: { ...prev.settings, ...(remote.settings || {}) },
+        }));
+        setLastSynced(new Date());
+        showToast("Loaded latest records from Supabase", "success");
+        return true;
+      } else {
+        showToast("No remote records found in Supabase", "info");
+        return false;
+      }
+    } catch (err) {
+      showToast("Could not pull from Supabase: " + err.message, "error");
+      return false;
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [showToast]);
 
   return (
     <MuktContext.Provider
@@ -725,6 +1296,10 @@ export function MuktProvider({ children }) {
         updatePerson,
         deletePerson,
         updateSettings,
+        updateInterestConfig,
+        addInterestRateRevision,
+        deleteInterestRateRevision,
+        updateInterestRateRevision,
         completeOnboarding,
         loadDemo,
         wipeAll,
@@ -732,6 +1307,13 @@ export function MuktProvider({ children }) {
         exportCSV,
         restoreJSON,
         triggerConfetti,
+        // Supabase Cloud Sync
+        isSupabaseConfigured,
+        isSyncing,
+        lastSynced,
+        cloudHealth,
+        syncToCloud,
+        fetchFromCloud,
       }}
     >
       {children}

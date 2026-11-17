@@ -8,13 +8,19 @@ import {
   TrendingUp,
   Sparkles,
   RefreshCw,
+  User,
+  LogIn,
+  LogOut,
+  ShieldCheck,
 } from "lucide-react";
 import { useMukt } from "../../context/MuktContext";
+import { useAuth } from "../../context/AuthContext";
 import { CurrencySwitch } from "../common/CurrencySwitch";
 import { rateFmt } from "../../constants";
 
 export function Sidebar() {
   const { activeTab, changeTab, openModal, state, calc, isFetchingRate, refreshRate } = useMukt();
+  const { user, isAuthenticated, signOut } = useAuth();
   const { loanCur, localCur } = state.settings;
 
   const navItems = [
@@ -253,6 +259,101 @@ export function Sidebar() {
             )}
           </div>
         )}
+
+        {/* Account / Auth Card */}
+        <div
+          style={{
+            padding: "10px 12px",
+            background: "var(--bg-sunken)",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--border-subtle)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "8px",
+          }}
+        >
+          {isAuthenticated ? (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                <div
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    borderRadius: "50%",
+                    backgroundColor: "var(--accent)",
+                    color: "#fff",
+                    display: "grid",
+                    placeItems: "center",
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    flexShrink: 0,
+                  }}
+                >
+                  {(user?.user_metadata?.name?.[0] || user?.email?.[0] || "U").toUpperCase()}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      fontWeight: 700,
+                      color: "var(--text-main)",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {user?.user_metadata?.name || user?.email?.split("@")[0]}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "0.6875rem",
+                      color: "var(--text-dim)",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {user?.email}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={signOut}
+                title="Sign Out"
+                style={{
+                  color: "var(--text-dim)",
+                  padding: "4px",
+                  borderRadius: "4px",
+                  display: "grid",
+                  placeItems: "center",
+                }}
+              >
+                <LogOut size={14} />
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => openModal("auth", { mode: "signin" })}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+                color: "var(--accent)",
+                fontSize: "0.75rem",
+                fontWeight: 700,
+                padding: "4px 0",
+              }}
+            >
+              <LogIn size={14} />
+              <span>Sign In / Sync Account</span>
+            </button>
+          )}
+        </div>
 
         {/* Big Add Button */}
         <button

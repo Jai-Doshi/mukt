@@ -4,6 +4,7 @@ import { useMukt } from "../../context/MuktContext";
 import { formatMoney } from "../../constants";
 import { BottomSheet } from "../common/BottomSheet";
 import { triggerHaptic } from "../../utils/haptics";
+import { simulateInterestPayoff } from "../../utils/interestCalculator";
 
 export function PayoffSimulatorModal() {
   const { closeModal, state, calc } = useMukt();
@@ -31,6 +32,21 @@ export function PayoffSimulatorModal() {
     d.setMonth(d.getMonth() + newMonths);
     return d;
   }, [newMonths]);
+
+  const interestSim = useMemo(() => {
+    if (!calc.interest?.enabled || !(calc.interest?.currentPrincipal > 0)) {
+      return null;
+    }
+    const baseMonthlyInLoan = isLocal && rate ? basePaceDisplay * rate : basePaceDisplay;
+    const extraInLoan = isLocal && rate ? Number(extraPayment || 0) * rate : Number(extraPayment || 0);
+
+    return simulateInterestPayoff({
+      currentPrincipal: calc.interest.currentPrincipal,
+      currentRate: calc.interest.currentRate,
+      baseMonthlyPayment: baseMonthlyInLoan || 20000,
+      extraMonthlyPayment: extraInLoan,
+    });
+  }, [calc.interest, basePaceDisplay, extraPayment, isLocal, rate]);
 
   return (
     <BottomSheet
@@ -117,6 +133,38 @@ export function PayoffSimulatorModal() {
             </span>
           </div>
         </div>
+
+        {/* Floating Interest Saved Highlight */}
+        {interestSim && interestSim.interestSaved > 0 && (
+          <div
+            style={{
+              padding: "12px 14px",
+              borderRadius: "12px",
+              background: "linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(59, 130, 246, 0.1))",
+              border: "1px solid var(--accent-glow)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "18px",
+            }}
+          >
+            <div>
+              <span style={{ fontSize: "0.6875rem", fontWeight: 700, textTransform: "uppercase", color: "var(--accent)" }}>
+                Floating Interest Saved
+              </span>
+              <div style={{ fontSize: "1.125rem", fontWeight: 900, color: "var(--accent)" }}>
+                {formatMoney(
+                  isLocal && rate ? interestSim.interestSaved / rate : interestSim.interestSaved,
+                  currency,
+                  { round: true }
+                )}
+              </div>
+            </div>
+            <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-main)" }}>
+              At {calc.interest?.currentRate}% p.a.
+            </span>
+          </div>
+        )}
 
         {/* Extra Payment Slider & Input */}
         <div style={{ marginBottom: "20px" }}>
